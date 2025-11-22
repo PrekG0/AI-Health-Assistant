@@ -1,7 +1,7 @@
 import streamlit as st
 import numpy as np
 from PIL import Image
-import tflite_runtime.interpreter as tflite
+from tflite_support import interpreter as tflite
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.svm import SVC
 
