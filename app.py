@@ -1,18 +1,17 @@
 import streamlit as st
 import numpy as np
 from PIL import Image
-from tflite_support import interpreter as tflite
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.svm import SVC
 
-# LOAD TFLITE CNN MODEL
+# TFLITE SUPPORT TASK API
+from tflite_support.task import vision
+
+# Load TFLite model with Task API
 MODEL_PATH = "model.tflite"
+IMAGE_SIZE = (128, 128)
 
-interpreter = tflite.Interpreter(model_path=MODEL_PATH)
-interpreter.allocate_tensors()
-
-input_details = interpreter.get_input_details()
-output_details = interpreter.get_output_details()
+classifier = vision.ImageClassifier.create_from_file(MODEL_PATH)
 
 CLASS_NAMES = [
     "Bacterial Pneumonia",
@@ -22,19 +21,19 @@ CLASS_NAMES = [
     "Viral Pneumonia"
 ]
 
-# IMAGE PREPROCESSING
-def preprocess_image(img):
-    img = img.resize((128, 128))
-    img = np.array(img).astype("float32") / 255.0
+# IMAGE PREPROCESSING + PREDICTION
+def classify_image(img):
+    img = img.resize(IMAGE_SIZE)
+    img = np.array(img)
 
-    # Ensure RGB
-    if img.ndim == 2:
-        img = np.stack((img,) * 3, axis=-1)
+    tensor = vision.TensorImage.create_from_array(img)
+    result = classifier.classify(tensor)
 
-    img = np.expand_dims(img, axis=0)
-    return img
+    top = result.classifications[0].categories[0]
+    return top.index, top.score * 100
 
-# MINI SVM SYMPTOM DATASET
+
+# SVM SYMPTOM CHECKER
 symptom_sentences = [
     "fever cough chest pain",
     "cough weight loss night sweats",
@@ -53,7 +52,6 @@ symptom_labels = [
     "Normal"
 ]
 
-# Train SVM model
 tfidf = TfidfVectorizer()
 X = tfidf.fit_transform(symptom_sentences)
 
@@ -61,10 +59,11 @@ svm_model = SVC(kernel="linear")
 svm_model.fit(X, symptom_labels)
 
 def predict_symptom(text):
-    X_input = tfidf.transform([text])
-    return svm_model.predict(X_input)[0]
+    X_in = tfidf.transform([text])
+    return svm_model.predict(X_in)[0]
 
-# STREAMLIT UI
+
+# UI
 st.title("🧠 AI Health Assistant")
 
 option = st.sidebar.radio(
@@ -72,7 +71,7 @@ option = st.sidebar.radio(
     ["Chest X-Ray Classifier", "Symptom Checker"]
 )
 
-# FEATURE 1 — CNN
+# X-RAY CNN FEATURE
 if option == "Chest X-Ray Classifier":
     st.header("🩻 Chest X-Ray Disease Classifier")
 
@@ -82,25 +81,19 @@ if option == "Chest X-Ray Classifier":
         img = Image.open(uploaded_file).convert("RGB")
         st.image(img, caption="Uploaded Image", use_column_width=True)
 
-        processed = preprocess_image(img)
-
-        # TFLite inference
-        interpreter.set_tensor(input_details[0]['index'], processed)
-        interpreter.invoke()
-        preds = interpreter.get_tensor(output_details[0]['index'])[0]
-
-        pred_class = CLASS_NAMES[np.argmax(preds)]
-        confidence = float(np.max(preds)) * 100
+        pred_idx, confidence = classify_image(img)
+        pred_class = CLASS_NAMES[pred_idx]
 
         st.subheader("Prediction:")
         st.write(f"**{pred_class}**")
         st.write(f"Confidence: **{confidence:.2f}%**")
 
-# FEATURE 2 — SVM Model
+
+# SYMPTOM FEATURE
 if option == "Symptom Checker":
     st.header("🤒 Symptom-Based Disease Predictor")
 
-    text = st.text_area("Enter symptoms (e.g., 'fever cough fatigue'):")
+    text = st.text_area("Enter symptoms (e.g., 'fever cough fatigue'): ")
 
     if st.button("Predict Condition"):
         if text.strip() == "":
