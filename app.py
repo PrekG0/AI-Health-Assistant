@@ -1,17 +1,20 @@
-import streamlit as st
+import gradio as gr
 import numpy as np
 from PIL import Image
+import tflite_runtime.interpreter as tflite
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.svm import SVC
 
-# TFLITE SUPPORT TASK API
-from tflite_support.task import vision
-
-# Load TFLite model with Task API
+# ------------------------
+# LOAD TFLITE MODEL
+# ------------------------
 MODEL_PATH = "model.tflite"
-IMAGE_SIZE = (128, 128)
 
-classifier = vision.ImageClassifier.create_from_file(MODEL_PATH)
+interpreter = tflite.Interpreter(model_path=MODEL_PATH)
+interpreter.allocate_tensors()
+
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
 
 CLASS_NAMES = [
     "Bacterial Pneumonia",
@@ -21,19 +24,36 @@ CLASS_NAMES = [
     "Viral Pneumonia"
 ]
 
-# IMAGE PREPROCESSING + PREDICTION
-def classify_image(img):
-    img = img.resize(IMAGE_SIZE)
-    img = np.array(img)
+# ------------------------
+# IMAGE PREPROCESSING
+# ------------------------
+def preprocess_image(img):
+    img = img.resize((128, 128))
+    img = np.array(img).astype("float32") / 255.0
 
-    tensor = vision.TensorImage.create_from_array(img)
-    result = classifier.classify(tensor)
+    if img.ndim == 2:
+        img = np.stack((img,) * 3, axis=-1)
 
-    top = result.classifications[0].categories[0]
-    return top.index, top.score * 100
+    img = np.expand_dims(img, axis=0)
+    return img
 
+def classify_xray(image):
+    if image is None:
+        return "No image uploaded.", ""
 
+    processed = preprocess_image(image)
+    interpreter.set_tensor(input_details[0]["index"], processed)
+    interpreter.invoke()
+
+    preds = interpreter.get_tensor(output_details[0]["index"])[0]
+    idx = int(np.argmax(preds))
+    confidence = float(np.max(preds)) * 100
+
+    return CLASS_NAMES[idx], f"{confidence:.2f}%"
+
+# ------------------------
 # SVM SYMPTOM CHECKER
+# ------------------------
 symptom_sentences = [
     "fever cough chest pain",
     "cough weight loss night sweats",
@@ -58,47 +78,38 @@ X = tfidf.fit_transform(symptom_sentences)
 svm_model = SVC(kernel="linear")
 svm_model.fit(X, symptom_labels)
 
-def predict_symptom(text):
+def classify_symptoms(text):
+    if text.strip() == "":
+        return "Please enter symptoms."
+
     X_in = tfidf.transform([text])
-    return svm_model.predict(X_in)[0]
+    prediction = svm_model.predict(X_in)[0]
+    return prediction
 
+# ------------------------
+# GRADIO UI
+# ------------------------
+with gr.Blocks(title="AI Health Assistant") as demo:
+    
+    gr.Markdown("# 🧠 AI Health Assistant")
 
-# UI
-st.title("🧠 AI Health Assistant")
+    with gr.Tab("🩻 Chest X-Ray Classifier"):
+        xray_input = gr.Image(type="pil", label="Upload Chest X-Ray")
+        xray_button = gr.Button("Predict")
+        xray_label = gr.Textbox(label="Prediction")
+        xray_conf = gr.Textbox(label="Confidence")
 
-option = st.sidebar.radio(
-    "Choose a Feature:",
-    ["Chest X-Ray Classifier", "Symptom Checker"]
-)
+        xray_button.click(fn=classify_xray, 
+                          inputs=xray_input, 
+                          outputs=[xray_label, xray_conf])
 
-# X-RAY CNN FEATURE
-if option == "Chest X-Ray Classifier":
-    st.header("🩻 Chest X-Ray Disease Classifier")
+    with gr.Tab("🤒 Symptom Checker"):
+        symptom_input = gr.Textbox(label="Enter symptoms (e.g., 'fever cough fatigue')")
+        symptom_button = gr.Button("Predict Condition")
+        symptom_output = gr.Textbox(label="Possible Condition")
 
-    uploaded_file = st.file_uploader("Upload X-Ray Image", type=["jpg", "jpeg", "png"])
+        symptom_button.click(fn=classify_symptoms,
+                             inputs=symptom_input,
+                             outputs=symptom_output)
 
-    if uploaded_file:
-        img = Image.open(uploaded_file).convert("RGB")
-        st.image(img, caption="Uploaded Image", use_column_width=True)
-
-        pred_idx, confidence = classify_image(img)
-        pred_class = CLASS_NAMES[pred_idx]
-
-        st.subheader("Prediction:")
-        st.write(f"**{pred_class}**")
-        st.write(f"Confidence: **{confidence:.2f}%**")
-
-
-# SYMPTOM FEATURE
-if option == "Symptom Checker":
-    st.header("🤒 Symptom-Based Disease Predictor")
-
-    text = st.text_area("Enter symptoms (e.g., 'fever cough fatigue'): ")
-
-    if st.button("Predict Condition"):
-        if text.strip() == "":
-            st.error("Please type some symptoms.")
-        else:
-            result = predict_symptom(text)
-            st.subheader("Possible Condition:")
-            st.write(f"**{result}**")
+demo.launch()
