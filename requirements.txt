@@ -1,6 +1,5 @@
 streamlit
-tensorflow==2.10.0
 numpy
 pillow
-opencv-python
-matplotlib
+tflite-runtime==2.11.0
+scikit-learn
