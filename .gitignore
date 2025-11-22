@@ -1,0 +1,13 @@
+# Python venv
+tf310/
+venv/
+__pycache__/
+
+# Dataset (don't push)
+X-Ray_Dataset/
+
+# Large model files (optional — include if you prefer to not push model.h5)
+# final_lung_disease_model.h5
+
+# VSCode settings
+.vscode/
