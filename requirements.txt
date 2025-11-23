@@ -1,6 +1,5 @@
-gradio
-numpy
+gradio==5.9.0
+numpy<2
 pillow
-tflite-runtime==2.14.0
 scikit-learn
-
+tflite-runtime==2.14.0
